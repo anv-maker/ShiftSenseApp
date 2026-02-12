@@ -1,0 +1,838 @@
+/**
+ * ShiftSense – React Native (Expo) mobile app UI prototype
+ * Founders: Alex Vartanian, Sarah Lima, Will Kaufmann, Mackenzie Wright
+ *
+ * ✅ Paste this into: App.tsx (recommended) or App.js
+ * ✅ Works with Expo (managed workflow)
+ *
+ * Install deps:
+ *   npx create-expo-app ShiftSenseApp
+ *   cd ShiftSenseApp
+ *   npm install @react-navigation/native @react-navigation/bottom-tabs
+ *   npx expo install react-native-screens react-native-safe-area-context react-native-gesture-handler
+ *   npm start
+ */
+
+import React, { useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  FlatList,
+  Platform,
+} from "react-native";
+import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+
+// ---------- Theme ----------
+const COLORS = {
+  bg: "#F7F8FA", // soft white
+  card: "#FFFFFF",
+  border: "#E2E8F0",
+  text: "#0F172A", // slate-900
+  muted: "#64748B", // slate-500
+  emerald: "#059669",
+  emeraldSoft: "#ECFDF5",
+  amber: "#D97706",
+  amberSoft: "#FFFBEB",
+  red: "#DC2626",
+  redSoft: "#FEF2F2",
+  slateSoft: "#F1F5F9",
+};
+
+// ---------- Mock Data ----------
+const mock = {
+  user: { name: "Sarah", business: "Cafe Nova" },
+  kpis: { laborPct: 22.6, salesToday: 4832, onShift: 8, overtimeRisk: 71 },
+  alerts: [
+    {
+      id: "a1",
+      type: "Overtime Risk",
+      severity: "high" as const,
+      title: "2 employees nearing overtime",
+      detail: "Maria (37.5h) and Jay (38.2h) within 48h window.",
+      action: "Review timecards",
+      jumpTo: "Timecards" as const,
+    },
+    {
+      id: "a2",
+      type: "Conflict",
+      severity: "med" as const,
+      title: "Double-scheduled shift detected",
+      detail: "Will is scheduled at 2 locations, 2–6pm.",
+      action: "Resolve conflict",
+      jumpTo: "Schedule" as const,
+    },
+    {
+      id: "a3",
+      type: "Compliance",
+      severity: "low" as const,
+      title: "Break policy reminder",
+      detail: "2 shifts exceed 6h without a recorded break.",
+      action: "Audit breaks",
+      jumpTo: "Timecards" as const,
+    },
+  ],
+  schedule: {
+    weekLabel: "Feb 9–15",
+    days: [
+      {
+        day: "Mon",
+        date: "2/9",
+        shifts: [
+          { id: "s1", name: "Maria", role: "Barista", time: "8a–2p", badge: "OT" },
+          { id: "s2", name: "Jay", role: "Cashier", time: "10a–6p", badge: "" },
+        ],
+      },
+      {
+        day: "Tue",
+        date: "2/10",
+        shifts: [
+          { id: "s3", name: "Will", role: "Lead", time: "12p–8p", badge: "!" },
+          { id: "s4", name: "Nina", role: "Barista", time: "9a–3p", badge: "" },
+        ],
+      },
+      {
+        day: "Wed",
+        date: "2/11",
+        shifts: [
+          { id: "s5", name: "Omar", role: "Stock", time: "7a–1p", badge: "" },
+          { id: "s6", name: "Kai", role: "Cashier", time: "1p–7p", badge: "" },
+        ],
+      },
+      {
+        day: "Thu",
+        date: "2/12",
+        shifts: [{ id: "s7", name: "Mackenzie", role: "Mgr", time: "9a–5p", badge: "" }],
+      },
+      {
+        day: "Fri",
+        date: "2/13",
+        shifts: [
+          { id: "s8", name: "Alex", role: "Ops", time: "10a–6p", badge: "" },
+          { id: "s9", name: "Sarah", role: "Owner", time: "11a–4p", badge: "" },
+        ],
+      },
+    ],
+    suggestion: {
+      title: "Smart scheduling suggestion",
+      text: "Based on last month’s sales, add 1 staff member 12–3pm (lunch rush).",
+    },
+  },
+  timecards: [
+    { id: "t1", name: "Maria", hours: 37.5, overtimeRisk: true, discrepancies: 1 },
+    { id: "t2", name: "Jay", hours: 38.2, overtimeRisk: true, discrepancies: 0 },
+    { id: "t3", name: "Will", hours: 31.0, overtimeRisk: false, discrepancies: 2 },
+    { id: "t4", name: "Nina", hours: 28.5, overtimeRisk: false, discrepancies: 0 },
+    { id: "t5", name: "Omar", hours: 25.0, overtimeRisk: false, discrepancies: 0 },
+  ],
+  insights: {
+    note: "You were likely overstaffed Tue 2–5pm (low sales + higher scheduled hours).",
+  },
+  hub: {
+    timeOff: [
+      { id: "r1", name: "Nina", dates: "Feb 18–19", reason: "Family", status: "pending" as const },
+      { id: "r2", name: "Omar", dates: "Feb 14", reason: "Appointment", status: "pending" as const },
+    ],
+    announcements: [
+      { id: "m1", title: "New menu training", body: "10-min quick training before shift this week." },
+      { id: "m2", title: "Clock-in reminder", body: "Please clock in via Square before starting work." },
+    ],
+    docs: ["Employee Handbook.pdf", "Opening Checklist.docx", "Safety & Break Policy.pdf"],
+  },
+};
+
+function money(n: number) {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+  } catch {
+    return `$${n}`;
+  }
+}
+
+function toneToColors(tone: "emerald" | "amber" | "red" | "slate") {
+  switch (tone) {
+    case "emerald":
+      return { bg: COLORS.emeraldSoft, fg: COLORS.emerald };
+    case "amber":
+      return { bg: COLORS.amberSoft, fg: COLORS.amber };
+    case "red":
+      return { bg: COLORS.redSoft, fg: COLORS.red };
+    default:
+      return { bg: COLORS.slateSoft, fg: COLORS.text };
+  }
+}
+
+function Badge({ label, tone = "slate" }: { label: string; tone?: "emerald" | "amber" | "red" | "slate" }) {
+  const { bg, fg } = toneToColors(tone);
+  return (
+    <View style={[styles.badge, { backgroundColor: bg, borderColor: COLORS.border }]}>
+      <Text style={[styles.badgeText, { color: fg }]}>{label}</Text>
+    </View>
+  );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return <View style={styles.card}>{children}</View>;
+}
+
+function SectionTitle({ title, right }: { title: string; right?: React.ReactNode }) {
+  return (
+    <View style={styles.sectionTitleRow}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {right ? right : null}
+    </View>
+  );
+}
+
+function Divider() {
+  return <View style={styles.divider} />;
+}
+
+function Header() {
+  return (
+    <View style={styles.header}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.brandSmall}>ShiftSense</Text>
+        <Text style={styles.brandTitle}>Operational Command Center</Text>
+      </View>
+      <View style={styles.headerRight}>
+        <TextInput placeholder="Search" placeholderTextColor={COLORS.muted} style={styles.search} />
+        <View style={styles.avatar} />
+      </View>
+    </View>
+  );
+}
+
+// Simple “mini chart” (no external chart lib): bars for sales vs labor
+function MiniBars({ data }: { data: { t: string; sales: number; labor: number }[] }) {
+  const max = useMemo(() => Math.max(...data.map((d) => Math.max(d.sales, d.labor))), [data]);
+  return (
+    <View style={styles.miniChartWrap}>
+      {data.map((d) => {
+        const salesH = Math.round((d.sales / max) * 46);
+        const laborH = Math.round((d.labor / max) * 46);
+        return (
+          <View key={d.t} style={styles.miniBarCol}>
+            <View style={[styles.miniBar, { height: salesH, backgroundColor: COLORS.emerald }]} />
+            <View style={[styles.miniBar, { height: laborH, backgroundColor: "#94A3B8" }]} />
+            <Text style={styles.miniBarLabel}>{d.t}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ---------- Screens ----------
+function DashboardScreen({ navigation }: any) {
+  const { user, kpis, alerts } = mock;
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Header />
+
+        <Text style={styles.greeting}>Good morning, {user.name} 👋</Text>
+        <Text style={styles.subGreeting}>{user.business} • Connected to Square</Text>
+
+        <View style={styles.grid}>
+          <Card>
+            <Text style={styles.kpiLabel}>Labor Cost</Text>
+            <Text style={[styles.kpiValue, { color: COLORS.emerald }]}>{kpis.laborPct}%</Text>
+            <Text style={styles.kpiHint}>Target &lt; 25%</Text>
+          </Card>
+
+          <Card>
+            <Text style={styles.kpiLabel}>Sales Today</Text>
+            <Text style={[styles.kpiValue, { color: COLORS.emerald }]}>{money(kpis.salesToday)}</Text>
+            <Text style={styles.kpiHint}>Live</Text>
+          </Card>
+
+          <Card>
+            <Text style={styles.kpiLabel}>On Shift</Text>
+            <Text style={[styles.kpiValue, { color: COLORS.emerald }]}>{kpis.onShift}</Text>
+            <Text style={styles.kpiHint}>Clocked in</Text>
+          </Card>
+
+          <Card>
+            <Text style={styles.kpiLabel}>OT Risk</Text>
+            <Text style={[styles.kpiValue, { color: kpis.overtimeRisk >= 70 ? COLORS.amber : COLORS.emerald }]}>
+              {kpis.overtimeRisk}
+            </Text>
+            <Text style={styles.kpiHint}>Risk score</Text>
+          </Card>
+        </View>
+
+        <Card>
+          <SectionTitle title="Labor vs Sales" right={<Badge label="Live" tone="emerald" />} />
+          <MiniBars data={mock.laborVsSales} />
+          <Divider />
+          <View style={styles.rowBetween}>
+            <Text style={styles.smallMuted}>Protect margins by matching staffing to demand.</Text>
+            <TouchableOpacity onPress={() => navigation.navigate("Insights")}>
+              <Text style={styles.link}>Details →</Text>
+            </TouchableOpacity>
+          </View>
+        </Card>
+
+        <Card>
+          <SectionTitle title="Priority Alerts" right={<Badge label={`${alerts.length}`} tone="slate" />} />
+          <Divider />
+          {alerts.map((a) => (
+            <View key={a.id} style={styles.alertRow}>
+              <View style={styles.alertIcon} />
+              <View style={{ flex: 1 }}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.alertTitle}>{a.title}</Text>
+                  <Badge
+                    label={a.severity.toUpperCase()}
+                    tone={a.severity === "high" ? "red" : a.severity === "med" ? "amber" : "slate"}
+                  />
+                </View>
+                <Text style={styles.alertDetail}>{a.detail}</Text>
+                <TouchableOpacity onPress={() => navigation.navigate(a.jumpTo)}>
+                  <Text style={styles.link}>{a.action} →</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </Card>
+
+        <View style={styles.quickRow}>
+          <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate("Schedule")}>
+            <Text style={styles.quickTitle}>Create schedule</Text>
+            <Text style={styles.quickSub}>Smart suggestions</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate("Timecards")}>
+            <Text style={styles.quickTitle}>Audit timecards</Text>
+            <Text style={styles.quickSub}>Auto-check hours</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.aboutCard}>
+          <Text style={styles.aboutTitle}>The Intelligent Manager’s Companion</Text>
+          <Text style={styles.aboutText}>
+            ShiftSense takes the complex data living in your Square account and turns it into an actionable roadmap.
+          </Text>
+          <Text style={styles.aboutFounders}>
+            Founders: Alex Vartanian • Sarah Lima • Will Kaufmann • Mackenzie Wright
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function ScheduleScreen() {
+  const { schedule } = mock;
+  const [selectedDay, setSelectedDay] = useState(schedule.days[0].day);
+
+  const day = useMemo(() => schedule.days.find((d) => d.day === selectedDay) ?? schedule.days[0], [selectedDay, schedule.days]);
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Header />
+
+        <Card>
+          <SectionTitle title="Scheduling" right={<Badge label={schedule.weekLabel} tone="slate" />} />
+          <View style={styles.daysRow}>
+            {schedule.days.map((d) => {
+              const active = d.day === selectedDay;
+              return (
+                <TouchableOpacity
+                  key={d.day}
+                  onPress={() => setSelectedDay(d.day)}
+                  style={[styles.dayPill, active && { backgroundColor: COLORS.emeraldSoft, borderColor: "#A7F3D0" }]}
+                >
+                  <Text style={[styles.dayPillTop, active && { color: COLORS.emerald }]}>{d.day}</Text>
+                  <Text style={styles.dayPillBottom}>{d.date}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.suggestion}>
+            <Text style={styles.suggestionTitle}>{schedule.suggestion.title}</Text>
+            <Text style={styles.suggestionText}>{schedule.suggestion.text}</Text>
+            <TouchableOpacity>
+              <Text style={styles.link}>Apply suggestion →</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Divider />
+          <SectionTitle title={`${day.day} Shifts`} right={<Badge label={`${day.shifts.length} shifts`} tone="slate" />} />
+
+          {day.shifts.map((s) => (
+            <View key={s.id} style={styles.shiftRow}>
+              <View style={{ flex: 1 }}>
+                <View style={styles.rowGap}>
+                  <Text style={styles.shiftName}>{s.name}</Text>
+                  {s.badge === "OT" ? <Badge label="OT risk" tone="amber" /> : null}
+                  {s.badge === "!" ? <Badge label="conflict" tone="red" /> : null}
+                </View>
+                <Text style={styles.shiftMeta}>
+                  {s.role} • {s.time}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.secondaryBtn}>
+                <Text style={styles.secondaryBtnText}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+
+          <Text style={styles.smallMuted}>
+            Conflict Detection flags double-booking and common labor rule issues (configure by location in Settings).
+          </Text>
+        </Card>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function TimecardsScreen() {
+  const [mode, setMode] = useState<"regular" | "overtime" | "discrepancies">("regular");
+  const [audited, setAudited] = useState(false);
+
+  const filtered = useMemo(() => {
+    return mock.timecards.filter((e) => {
+      if (mode === "regular") return true;
+      if (mode === "overtime") return e.overtimeRisk;
+      return e.discrepancies > 0;
+    });
+  }, [mode]);
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Header />
+
+        <Card>
+          <View style={styles.rowBetween}>
+            <View>
+              <Text style={styles.sectionTitle}>Timecards & Overtime</Text>
+              <Text style={styles.smallMuted}>Auto-optimize timesheets from Square timecards.</Text>
+            </View>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => setAudited(true)}>
+              <Text style={styles.primaryBtnText}>Auto-check</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.segment}>
+            {[
+              { key: "regular", label: "Regular" },
+              { key: "overtime", label: "Overtime" },
+              { key: "discrepancies", label: "Discrepancies" },
+            ].map((t) => {
+              const active = mode === (t.key as any);
+              return (
+                <TouchableOpacity
+                  key={t.key}
+                  onPress={() => setMode(t.key as any)}
+                  style={[styles.segmentItem, active && { backgroundColor: COLORS.card }]}
+                >
+                  <Text style={[styles.segmentText, active && { color: COLORS.text }]}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {audited ? (
+            <View style={styles.auditBanner}>
+              <Text style={styles.auditTitle}>Audit complete</Text>
+              <Text style={styles.auditText}>Found 3 potential issues: 2 overtime risks, 1 missing break.</Text>
+            </View>
+          ) : null}
+
+          <Divider />
+
+          <FlatList
+            data={filtered}
+            keyExtractor={(i) => i.id}
+            scrollEnabled={false}
+            renderItem={({ item }) => (
+              <View style={styles.timecardRow}>
+                <View style={styles.avatar} />
+                <View style={{ flex: 1 }}>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.shiftName}>{item.name}</Text>
+                    <Text style={styles.shiftName}>{item.hours.toFixed(1)}h</Text>
+                  </View>
+                  <View style={styles.rowGap}>
+                    {item.overtimeRisk ? <Badge label="OT risk" tone="amber" /> : null}
+                    {item.discrepancies > 0 ? <Badge label={`${item.discrepancies} discrepancy`} tone="red" /> : null}
+                    {!item.overtimeRisk && item.discrepancies === 0 ? (
+                      <Text style={styles.smallMuted}>No issues detected</Text>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+            )}
+          />
+
+          <Divider />
+          <Text style={styles.footerNote}>
+            Direct Square sync via <Text style={styles.bold}>Square Labor API</Text> and roles via{" "}
+            <Text style={styles.bold}>Square Team API</Text>.
+          </Text>
+        </Card>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function InsightsScreen() {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Header />
+
+        <Card>
+          <SectionTitle title="Real-Time Labor Insights" right={<Badge label="Bird’s-eye" tone="emerald" />} />
+          <Text style={[styles.smallMuted, { marginBottom: 10 }]}>
+            Get a live view of labor cost signals versus sales to protect margins.
+          </Text>
+
+          <MiniBars data={mock.laborVsSales} />
+
+          <Divider />
+          <View style={styles.insightBox}>
+            <Text style={styles.insightTitle}>Insight</Text>
+            <Text style={styles.insightText}>{mock.insights.note}</Text>
+          </View>
+
+          <View style={styles.metricGrid}>
+            <MetricTile title="Overstaff risk" value="Moderate" />
+            <MetricTile title="Peak hour" value="12–2pm" />
+            <MetricTile title="Labor target" value="< 25%" />
+            <MetricTile title="Trend" value="Improving" />
+          </View>
+        </Card>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function MetricTile({ title, value }: { title: string; value: string }) {
+  return (
+    <View style={styles.metricTile}>
+      <Text style={styles.metricTitle}>{title}</Text>
+      <Text style={styles.metricValue}>{value}</Text>
+    </View>
+  );
+}
+
+function TeamHubScreen() {
+  const [tab, setTab] = useState<"timeoff" | "announcements" | "docs">("timeoff");
+  const [requests, setRequests] = useState(mock.hub.timeOff);
+
+  function updateStatus(id: string, status: "approved" | "denied") {
+    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+  }
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Header />
+
+        <Card>
+          <SectionTitle title="Team Hub" right={<Badge label="Centralized" tone="emerald" />} />
+
+          <View style={styles.segment}>
+            {[
+              { key: "timeoff", label: "Time off" },
+              { key: "announcements", label: "Updates" },
+              { key: "docs", label: "Docs" },
+            ].map((t) => {
+              const active = tab === (t.key as any);
+              return (
+                <TouchableOpacity
+                  key={t.key}
+                  onPress={() => setTab(t.key as any)}
+                  style={[styles.segmentItem, active && { backgroundColor: COLORS.card }]}
+                >
+                  <Text style={[styles.segmentText, active && { color: COLORS.text }]}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {tab === "timeoff" ? (
+            <View style={{ gap: 10 }}>
+              {requests.map((r) => (
+                <View key={r.id} style={styles.requestCard}>
+                  <View style={styles.rowBetween}>
+                    <View>
+                      <Text style={styles.shiftName}>{r.name}</Text>
+                      <Text style={styles.smallMuted}>
+                        {r.dates} • {r.reason}
+                      </Text>
+                    </View>
+                    <Badge
+                      label={r.status.toUpperCase()}
+                      tone={r.status === "pending" ? "slate" : r.status === "approved" ? "emerald" : "red"}
+                    />
+                  </View>
+
+                  {r.status === "pending" ? (
+                    <View style={styles.btnRow}>
+                      <TouchableOpacity style={[styles.primaryBtn, { flex: 1 }]} onPress={() => updateStatus(r.id, "approved")}>
+                        <Text style={styles.primaryBtnText}>Approve</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.secondaryBtn, { flex: 1 }]} onPress={() => updateStatus(r.id, "denied")}>
+                        <Text style={styles.secondaryBtnText}>Deny</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {tab === "announcements" ? (
+            <View style={{ gap: 10 }}>
+              {mock.hub.announcements.map((m) => (
+                <View key={m.id} style={styles.requestCard}>
+                  <Text style={styles.shiftName}>{m.title}</Text>
+                  <Text style={styles.alertDetail}>{m.body}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {tab === "docs" ? (
+            <View style={{ gap: 10 }}>
+              {mock.hub.docs.map((d) => (
+                <View key={d} style={styles.requestCard}>
+                  <Text style={styles.shiftName}>{d}</Text>
+                  <Text style={styles.smallMuted}>Team document</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          <Divider />
+          <Text style={styles.footerNote}>
+            Founders: Alex Vartanian • Sarah Lima • Will Kaufmann • Mackenzie Wright
+          </Text>
+        </Card>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ---------- Navigation ----------
+const Tab = createBottomTabNavigator();
+
+const navTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: COLORS.bg,
+    card: COLORS.card,
+    border: COLORS.border,
+    text: COLORS.text,
+    primary: COLORS.emerald,
+  },
+};
+
+export default function App() {
+  return (
+    <NavigationContainer theme={navTheme}>
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: COLORS.card,
+            borderTopColor: COLORS.border,
+            height: Platform.OS === "ios" ? 86 : 70,
+            paddingBottom: Platform.OS === "ios" ? 28 : 10,
+            paddingTop: 10,
+          },
+          tabBarActiveTintColor: COLORS.emerald,
+          tabBarInactiveTintColor: COLORS.muted,
+          tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        }}
+      >
+        <Tab.Screen name="Dashboard" component={DashboardScreen} />
+        <Tab.Screen name="Schedule" component={ScheduleScreen} />
+        <Tab.Screen name="Timecards" component={TimecardsScreen} />
+        <Tab.Screen name="Insights" component={InsightsScreen} />
+        <Tab.Screen name="Team" component={TeamHubScreen} />
+      </Tab.Navigator>
+    </NavigationContainer>
+  );
+}
+
+// ---------- Styles ----------
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: COLORS.bg },
+  container: {
+    padding: 16,
+    paddingBottom: 28,
+    gap: 12,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 6,
+  },
+  brandSmall: { fontSize: 11, fontWeight: "700", color: COLORS.muted },
+  brandTitle: { fontSize: 16, fontWeight: "800", color: COLORS.text },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+  search: {
+    width: 120,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    color: COLORS.text,
+    fontSize: 13,
+  },
+  avatar: { width: 34, height: 34, borderRadius: 999, backgroundColor: "#0F172A1A", borderWidth: 1, borderColor: COLORS.border },
+
+  greeting: { fontSize: 15, fontWeight: "700", color: COLORS.text },
+  subGreeting: { fontSize: 12, color: COLORS.muted, marginTop: -6 },
+
+  card: {
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 18,
+    padding: 14,
+    gap: 10,
+  },
+  sectionTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sectionTitle: { fontSize: 14, fontWeight: "800", color: COLORS.text },
+  divider: { height: 1, backgroundColor: "#EEF2F7" },
+
+  badge: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  badgeText: { fontSize: 11, fontWeight: "800" },
+
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  kpiLabel: { fontSize: 12, fontWeight: "700", color: COLORS.muted },
+  kpiValue: { fontSize: 24, fontWeight: "900" },
+  kpiHint: { fontSize: 11, color: COLORS.muted },
+
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  rowGap: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  smallMuted: { fontSize: 12, color: COLORS.muted },
+  link: { fontSize: 13, fontWeight: "800", color: COLORS.emerald },
+
+  miniChartWrap: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", paddingTop: 6 },
+  miniBarCol: { alignItems: "center", width: 32 },
+  miniBar: { width: 10, borderRadius: 6, marginHorizontal: 2 },
+  miniBarLabel: { fontSize: 10, color: COLORS.muted, marginTop: 6 },
+
+  alertRow: { flexDirection: "row", gap: 10, paddingVertical: 10 },
+  alertIcon: { width: 34, height: 34, borderRadius: 12, backgroundColor: COLORS.slateSoft, borderWidth: 1, borderColor: COLORS.border },
+  alertTitle: { fontSize: 13, fontWeight: "900", color: COLORS.text, flex: 1, marginRight: 8 },
+  alertDetail: { fontSize: 12, color: COLORS.muted, marginTop: 4 },
+
+  quickRow: { flexDirection: "row", gap: 12 },
+  quickBtn: {
+    flex: 1,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 18,
+    padding: 14,
+  },
+  quickTitle: { fontSize: 13, fontWeight: "900", color: COLORS.text },
+  quickSub: { fontSize: 12, color: COLORS.muted, marginTop: 4 },
+
+  aboutCard: {
+    backgroundColor: COLORS.emerald,
+    borderRadius: 18,
+    padding: 14,
+  },
+  aboutTitle: { fontSize: 13, fontWeight: "900", color: "white" },
+  aboutText: { fontSize: 12, color: "white", opacity: 0.9, marginTop: 6 },
+  aboutFounders: { fontSize: 10, color: "white", opacity: 0.85, marginTop: 10 },
+
+  daysRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  dayPill: {
+    width: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  dayPillTop: { fontSize: 12, fontWeight: "900", color: COLORS.text },
+  dayPillBottom: { fontSize: 11, color: COLORS.muted, marginTop: 2 },
+
+  suggestion: {
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    backgroundColor: COLORS.emeraldSoft,
+    borderRadius: 16,
+    padding: 12,
+    gap: 6,
+  },
+  suggestionTitle: { fontSize: 13, fontWeight: "900", color: COLORS.text },
+  suggestionText: { fontSize: 12, color: "#334155" },
+
+  shiftRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 10,
+  },
+  shiftName: { fontSize: 13, fontWeight: "900", color: COLORS.text },
+  shiftMeta: { fontSize: 12, color: COLORS.muted, marginTop: 4 },
+
+  primaryBtn: { backgroundColor: COLORS.emerald, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14 },
+  primaryBtnText: { color: "white", fontSize: 13, fontWeight: "900" },
+  secondaryBtn: { borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.slateSoft, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14 },
+  secondaryBtnText: { color: COLORS.text, fontSize: 13, fontWeight: "900" },
+
+  segment: {
+    flexDirection: "row",
+    backgroundColor: COLORS.slateSoft,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    padding: 4,
+    gap: 6,
+    marginTop: 10,
+  },
+  segmentItem: { flex: 1, paddingVertical: 10, borderRadius: 14, alignItems: "center" },
+  segmentText: { fontSize: 12, fontWeight: "900", color: COLORS.muted },
+
+  auditBanner: { marginTop: 10, borderWidth: 1, borderColor: "#A7F3D0", backgroundColor: COLORS.emeraldSoft, borderRadius: 16, padding: 12 },
+  auditTitle: { fontSize: 13, fontWeight: "900", color: COLORS.text },
+  auditText: { fontSize: 12, color: "#334155", marginTop: 4 },
+
+  timecardRow: { flexDirection: "row", gap: 10, paddingVertical: 12, alignItems: "center" },
+
+  footerNote: { fontSize: 12, color: COLORS.muted, marginTop: 6 },
+  bold: { fontWeight: "900", color: COLORS.text },
+
+  insightBox: { borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.slateSoft, borderRadius: 16, padding: 12, marginTop: 10 },
+  insightTitle: { fontSize: 13, fontWeight: "900", color: COLORS.text },
+  insightText: { fontSize: 12, color: "#334155", marginTop: 4 },
+
+  metricGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 12 },
+  metricTile: { width: "48%", backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 16, padding: 12 },
+  metricTitle: { fontSize: 12, fontWeight: "800", color: COLORS.muted },
+  metricValue: { fontSize: 13, fontWeight: "900", color: COLORS.text, marginTop: 6 },
+
+  requestCard: { borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.card, borderRadius: 16, padding: 12, gap: 10, marginTop: 10 },
+  btnRow: { flexDirection: "row", gap: 10 },
+});
